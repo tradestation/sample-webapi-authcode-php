@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <script type="text/javascript" src="//code.jquery.com/jquery-2.0.3.min.js"></script>
+    <script type="text/javascript" src="//cdnjs.cloudflare.com/ajax/libs/jquery-url-parser/2.3.1/purl.min.js"></script>
+    <script type="text/javascript" src="//cdnjs.cloudflare.com/ajax/libs/d3/3.3.13/d3.min.js"></script>
+    <style>
+      #chart {
+        background: #333;
+        text-align: center;
+        white-space: nowrap;
+        overflow: auto;
+        padding: 10px;
+      }
+
+      #chart div {
+        box-sizing: border-box;
+      }
+
+      .box {
+        display: inline-block;
+        width: 11px;
+        margin-right: 3px;
+        position: relative;
+        vertical-align: bottom;
+        border: 1px solid #ccc;
+        border-width: 1px 0;
+      }
+
+      .box:before {
+        content: '';
+        position: absolute;
+        height: 100%;
+        left: 49%;
+        border-left: 1px solid #ccc;
+      }
+
+      .range {
+        position: absolute;
+        width: 100%;
+        border: 1px solid #390;
+        background: #6f0;
+      }
+
+      .range.fall {
+        border-color: #c00;
+        background: #f33;
+      }
+    </style>
+  </head>
+  <body>
+    <button id="authcode">Manually Login</button>
+    <button id="refresh" disabled="disabled">Refresh</button>
+    <input type="text" id="token" />
+    <button id="barhistory" disabled="disabled">Load chart</button>
+    <div id="quoteText"></div>
+    <div id="chart"></div>
+    <script type="text/javascript">
+      // enable refresh button
+      if (sessionStorage.refresh_token) {
+        $('#refresh').removeAttr('disabled');
+        $.get('gettoken.php?refresh=' + sessionStorage.refresh_token)
+        .done(function (data) {
+          $('#token').val(data.access_token);
+          $('#barhistory').removeAttr('disabled');
+        });
+      } else {
+        // pass authorization code to php to generate access_token
+        if ($.url().param("code")) {
+          $.get('gettoken.php?code=' + $.url().param("code"))
+          .done(function (data) {
+            $('#token').val(data.access_token);
+
+            if (typeof(Storage) !== "undefined")
+              sessionStorage.refresh_token = data.refresh_token;
+
+            $('#refresh').removeAttr('disabled');
+            $('#barhistory').removeAttr('disabled');
+          })
+          .fail(function () {
+            // php will redirect to TS login page
+            location.href = "gettoken.php";
+          });
+        }
+      }
+
+      $('#authcode').click(function () {
+        // php will redirect to TS login page
+        location.href = "gettoken.php";
+      });
+
+      // pass refresh_token to php to generate access_token
+      $('#refresh').click(function () {
+        $.get('gettoken.php?refresh=' + sessionStorage.refresh_token)
+        .done(function (data) {
+          $('#token').val(data.access_token);
+        });
+      });
+
+      $('#barhistory').click(function () {
+        $.get('gettoken.php?refresh=' + sessionStorage.refresh_token + '&history=MSFT')
+        .done(function (data) {
+          $('#chart').empty();
+          var bars = [];
+          $.each(data.split("\n"), function (index, value) {
+            if (value !== "END") {
+              var bar = $.parseJSON(value);
+              bar.TimeStamp = new Date(parseInt(bar.TimeStamp.substring(6)));
+              bars.push(bar);
+            }
+          });
+
+          (function (dataset) {
+              // influenced by: http://phrogz.net/js/d3-playground/#StockPrice_HTML
+              var min = Math.min.apply(null, dataset.map(function (d) { return d.Low; })),
+                  max = Math.max.apply(null, dataset.map(function (d) { return d.High; })),
+                  vscale = (document.querySelector('#chart').offsetHeight + 350);
+
+              var vol = dataset.map(function (d) { return d.TotalVolume; }),
+                  volMin = Math.min.apply(Math, vol),
+                  volDiff = Math.max.apply(Math, vol) - volMin;
+
+              var boxes = d3.select('#chart').selectAll('div.box').data(dataset);
+
+              boxes.enter()
+                  .append('div').attr('class', 'box')
+                  .append('div').attr('class', 'range');
+
+              boxes
+                  .sort(function (a, b) { return (a.TimeStamp < b.TimeStamp)
+                      ? - 1 : (a.TimeStamp > b.TimeStamp)
+                          ? 1 : 0 })
+                  .attr('title', function (d) {
+                        var date = d.TimeStamp.getFullYear() + '-' + (d.TimeStamp.getMonth() + 1) + '-' + d.TimeStamp.getDate();
+                        return date + ' open: ' + d.Open + ', close: ' + d.Close + ' (' + d.Low + '-' + d.High + ')';
+                      })
+                  .style('height', function (d) { return (d.High - d.Low) * vscale + 'px'; })
+                  .style('margin-bottom', function (d) { return (d.Low - min) * vscale + 'px'; })
+                  .select('.range')
+                  .classed('fall', function (d) { return d.Open > d.Close; })
+                  .style('height', function (d) { return Math.abs(d.Open - d.Close) * vscale + 'px'; })
+                  .style('bottom', function (d) { return (Math.min(d.Close, d.Open) - d.Low) * vscale + 'px'; })
+                  .style('opacity', function (d) { return (d.TotalVolume - volMin) / volDiff });
+          })(bars);
+        });
+      });
+    </script>
+  </body>
+</html>
